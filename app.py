@@ -16,26 +16,31 @@ from app_components.st_inputs import create_system_inputs, calculate_capex_subto
 def display_capex_breakdown(capex_subtotals: Dict[str, Dict[str, float]]) -> None:
     """Display CAPEX breakdown with metric and chart side by side."""
     st.subheader("CAPEX Breakdown")
-    total_capex = sum(component['total_absolute'] for component in capex_subtotals.values())
+    total_capex = sum(component['total_absolute']
+                      for component in capex_subtotals.values())
     st.metric("Total CAPEX", f"${total_capex:.1f}M")
-    st.plotly_chart(create_capex_chart(capex_subtotals), use_container_width=True)
+    st.plotly_chart(create_capex_chart(capex_subtotals),
+                    use_container_width=True)
 
     with st.expander("Subcategory breakdown"):
         create_subcategory_capex_charts(capex_subtotals)
+
 
 def display_energy_mix(energy_mix: Dict[str, float]) -> None:
     """Display energy mix with metric and chart side by side."""
     st.subheader("Energy Mix")
     st.metric("Renewable %", f"{energy_mix['renewable_percentage']:.1f}%")
-    st.plotly_chart(create_energy_mix_chart(energy_mix), use_container_width=True)
+    st.plotly_chart(create_energy_mix_chart(
+        energy_mix), use_container_width=True)
+
 
 def main():
     """Main application."""
     display_intro_section()
-    
+
     inputs = create_system_inputs()
 
-    map_col, graph_col = st.columns([2,2], gap="medium")
+    map_col, graph_col = st.columns([2, 2], gap="medium")
 
     with map_col:
         lat, long, location_name = create_map_input()
@@ -44,7 +49,8 @@ def main():
         calc_status_display = st.empty()
 
         st.session_state.calculation_status = f"Selected ({round(lat, 1)}, {round(long, 1)}) in {location_name}\nFetching weather data..."
-        calc_status_display.code(st.session_state.calculation_status, language="")
+        calc_status_display.code(
+            st.session_state.calculation_status, language="")
 
         # Fetch weather data
         t1 = time.time()
@@ -65,6 +71,7 @@ def main():
             inputs['bess_max_power_mw'],
             inputs['generator_capacity_mw'],
             inputs['datacenter_load_mw'],
+            inputs['bess_capacity_mwh'],
         )
         st.session_state.calculation_status += f"\nPowerflow simulation ran in {time.time()-t1:.2f} seconds"
         calc_status_display.code(st.session_state.calculation_status)
@@ -101,12 +108,14 @@ def main():
         data_center = DataCenter(
             solar_pv_capacity_mw=inputs['solar_pv_capacity_mw'],
             bess_max_power_mw=inputs['bess_max_power_mw'],
+            bess_capacity_mwh=inputs['bess_capacity_mwh'],
             generator_capacity_mw=inputs['generator_capacity_mw'],
             generator_type=inputs['generator_type'],
             solar_capex_total_dollar_per_w=capex_subtotals['solar']['rate'],
             bess_capex_total_dollar_per_kwh=capex_subtotals['bess']['rate'],
             generator_capex_total_dollar_per_kw=capex_subtotals['generator']['rate'],
-            system_integration_capex_total_dollar_per_kw=capex_subtotals['system_integration']['rate'],
+            system_integration_capex_total_dollar_per_kw=capex_subtotals[
+                'system_integration']['rate'],
             soft_costs_capex_total_pct=capex_subtotals['soft_costs']['rate'],
             om_solar_fixed_dollar_per_kw=inputs['solar_om_fixed_dollar_per_kw'],
             om_bess_fixed_dollar_per_kw=inputs['bess_om_fixed_dollar_per_kw'],
@@ -129,19 +138,18 @@ def main():
     except ValueError as e:
         st.error(str(e))
         st.stop()
-    
 
     # Calculate LCOE
     lcoe, pro_forma = data_center.calculate_lcoe()
-    
-    # Display LCOE  
+
+    # Display LCOE
     st.subheader("Levelized Cost of Electricity")
     st.metric("Calculated LCOE", f"${lcoe:.2f}/MWh")
-    
+
     st.subheader("Financial Model")
     formatted_proforma = format_proforma(pro_forma)
     display_proforma(formatted_proforma)
 
-    
+
 if __name__ == "__main__":
     main()

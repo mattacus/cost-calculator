@@ -11,6 +11,7 @@ from concurrent.futures import ThreadPoolExecutor
 import logging
 
 from core.datacenter import DataCenter
+from core.defaults import BESS_HRS_STORAGE
 from core.powerflow_model import simulate_system, get_solar_ac_dataframe, calculate_energy_mix
 from core.pareto_frontier import process_ensemble_data
 
@@ -23,12 +24,13 @@ logger = logging.getLogger(__name__)
 
 MAX_CONCURRENT = 10
 
+
 def run_lcoe_calculation(case: Dict[str, Any]) -> Dict[str, Any]:
     """Run the calculation synchronously."""
     try:
         # Get solar generation data
         solar_ac_dataframe = get_solar_ac_dataframe(case['lat'], case['long'])
-        
+
         # Simulate powerflow
         powerflow_results = simulate_system(
             case['lat'],
@@ -37,26 +39,33 @@ def run_lcoe_calculation(case: Dict[str, Any]) -> Dict[str, Any]:
             case['solar_pv_capacity_mw'],
             case['bess_max_power_mw'],
             case['generator_capacity_mw'],
-            case['datacenter_load_mw']
+            case['datacenter_load_mw'],
+            case['bess_capacity_mwh']
         )
-        
+
         # Create DataCenter instance with simulation data
         datacenter = DataCenter(
             solar_pv_capacity_mw=case['solar_pv_capacity_mw'],
             bess_max_power_mw=case['bess_max_power_mw'],
+            bess_capacity_mwh=case['bess_capacity_mwh'],
             generator_capacity_mw=case['generator_capacity_mw'],
             filtered_simulation_data=powerflow_results['annual_results']
         )
-        
+
         # Calculate LCOE
         lcoe, _ = datacenter.calculate_lcoe()
-        
+
         # Get energy mix details
         energy_mix = calculate_energy_mix(powerflow_results['annual_results'])
-        
+
         # Create system spec string
-        system_spec = f"{case['solar_pv_capacity_mw']}MW_PV_{case['bess_max_power_mw']}MW_BESS_{case['generator_capacity_mw']}MW_{case['generator_type'].replace(' ', '')}"
-        
+        system_spec = (
+            f"{case['solar_pv_capacity_mw']}MW_PV_"
+            f"{case['bess_max_power_mw']}MW_"
+            f"{case['bess_capacity_mwh']}MWh_BESS_"
+            f"{case['generator_capacity_mw']}MW_{case['generator_type'].replace(' ', '')}"
+        )
+
         return {
             **case,
             'system_spec': system_spec,
@@ -64,7 +73,7 @@ def run_lcoe_calculation(case: Dict[str, Any]) -> Dict[str, Any]:
             'renewable_percentage': energy_mix['renewable_percentage'],
             'status': 'success'
         }
-        
+
     except Exception as e:
         logger.error(f"Error in calculation: {str(e)}")
         return {
@@ -75,46 +84,57 @@ def run_lcoe_calculation(case: Dict[str, Any]) -> Dict[str, Any]:
             'status': f'error: {str(e)}'
         }
 
+
 async def calculate_case(case: Dict[str, Any], case_number: int, total_cases: int, executor: ThreadPoolExecutor) -> Dict[str, Any]:
     """Calculate LCOE and renewable percentage for a single case."""
     start_time = time.time()
-    
+
     # Create system spec string for logging
-    system_spec = f"{case['solar_pv_capacity_mw']}MW_PV_{case['bess_max_power_mw']}MW_BESS_{case['generator_capacity_mw']}MW_{case['generator_type'].replace(' ', '')}"
-    logger.info(f"[{case_number}/{total_cases}] Processing ({case['lat']:.2f}, {case['long']:.2f}) - {system_spec}")
-    
+    system_spec = (
+        f"{case['solar_pv_capacity_mw']}MW_PV_"
+        f"{case['bess_max_power_mw']}MW_"
+        f"{case['bess_capacity_mwh']}MWh_BESS_"
+        f"{case['generator_capacity_mw']}MW_{case['generator_type'].replace(' ', '')}"
+    )
+    logger.info(
+        f"[{case_number}/{total_cases}] Processing ({case['lat']:.2f}, {case['long']:.2f}) - {system_spec}")
+
     # Run calculation in thread pool
     loop = asyncio.get_event_loop()
     result = await loop.run_in_executor(executor, run_lcoe_calculation, case)
-    
+
     elapsed_time = time.time() - start_time
     if result['status'] == 'success':
-        logger.info(f"✓ Completed case {case_number}/{total_cases} in {elapsed_time:.2f}s - LCOE: ${result['lcoe']:.2f}/MWh, Renewable: {result['renewable_percentage']:.1f}%")
+        logger.info(
+            f"✓ Completed case {case_number}/{total_cases} in {elapsed_time:.2f}s - LCOE: ${result['lcoe']:.2f}/MWh, Renewable: {result['renewable_percentage']:.1f}%")
     else:
-        logger.error(f"✗ Error in case {case_number}/{total_cases}: {result['status']}")
-    
+        logger.error(
+            f"✗ Error in case {case_number}/{total_cases}: {result['status']}")
+
     return result
+
 
 async def run_ensemble(cases: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Run all cases with concurrency limit."""
     total_cases = len(cases)
-    logger.info(f"Starting ensemble simulation with {total_cases} cases ({MAX_CONCURRENT} concurrent)")
+    logger.info(
+        f"Starting ensemble simulation with {total_cases} cases ({MAX_CONCURRENT} concurrent)")
     logger.info("=" * 80)
-    
+
     # Create thread pool executor
     with ThreadPoolExecutor(max_workers=MAX_CONCURRENT) as executor:
         # Create semaphore to limit concurrent executions
         sem = asyncio.Semaphore(MAX_CONCURRENT)
-        
+
         async def bounded_calculate(case: Dict[str, Any], case_number: int) -> Dict[str, Any]:
             async with sem:
                 return await calculate_case(case, case_number, total_cases, executor)
-        
+
         # Run all cases
         start_time = time.time()
         tasks = [bounded_calculate(case, i+1) for i, case in enumerate(cases)]
         results = await asyncio.gather(*tasks)
-        
+
         # Print summary
         elapsed_time = time.time() - start_time
         success_count = sum(1 for r in results if r['status'] == 'success')
@@ -122,17 +142,18 @@ async def run_ensemble(cases: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         logger.info(f"Ensemble simulation completed in {elapsed_time:.2f}s")
         logger.info(f"Successful cases: {success_count}/{total_cases}")
         logger.info("=" * 80)
-        
+
         return results
+
 
 def save_raw_results(results: List[Dict[str, Any]], output_path: Path) -> None:
     """Save results to CSV file."""
     # Convert results to DataFrame
     df = pd.DataFrame(results)
-    
+
     # Add timestamp
     df['timestamp'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    
+
     # Reorder columns
     columns = [
         'timestamp',
@@ -141,24 +162,26 @@ def save_raw_results(results: List[Dict[str, Any]], output_path: Path) -> None:
         'system_spec',
         'solar_pv_capacity_mw',
         'bess_max_power_mw',
+        'bess_capacity_mwh',
         'generator_capacity_mw',
         'lcoe',
         'renewable_percentage',
         'status'
     ]
     df = df[columns]
-    
+
     df.to_csv(output_path, index=False)
     logger.info(f"Raw results saved to {output_path}")
+
 
 async def main():
     logger.info("LCOE Solar DC Ensemble Simulation")
     logger.info("=" * 80)
-    
+
     # El Paso, TX coordinates
     lat = 31.7619
     long = -106.4850
-    
+
     ################### Define test cases ###################
     solar_capacities = list(range(0, 1000, 100))
     bess_capacities = list(range(0, 1000, 100))
@@ -176,33 +199,36 @@ async def main():
             'long': long,
             'solar_pv_capacity_mw': solar,
             'bess_max_power_mw': bess,
+            'bess_capacity_mwh': bess * BESS_HRS_STORAGE,
             'generator_capacity_mw': generator,
-            'generator_type': 'Gas Engine', 
+            'generator_type': 'Gas Engine',
             'datacenter_load_mw': 100  # Fixed load for all cases
         }
         cases.append(case)
     ################### End of test cases ###################
-    
+
     logger.info("Configuration:")
     logger.info(f"Location: ({lat}, {long})")
-    logger.info(f"Solar PV capacities: {', '.join(map(str, solar_capacities))} MW")
+    logger.info(
+        f"Solar PV capacities: {', '.join(map(str, solar_capacities))} MW")
     logger.info(f"BESS capacities: {', '.join(map(str, bess_capacities))} MW")
-    logger.info(f"Generator capacities: {', '.join(map(str, generator_capacities))} MW")
-    
+    logger.info(
+        f"Generator capacities: {', '.join(map(str, generator_capacities))} MW")
+
     # Run ensemble acrosss all points
     results = await run_ensemble(cases)
-    
+
     # Save raw results
-    output_path = Path(f"ensemble_results_raw_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv")
+    output_path = Path(f"ensemble_results_raw_{datetime.now().strftime(" % Y % m % d_ % H % M % S")}.csv")
     save_raw_results(results, output_path)
 
     # Process Pareto optimal points
     pareto_points = process_ensemble_data(results)
-    
+
     # Save Pareto optimal points
-    pareto_output_path = Path(f"ensemble_results_pareto_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv")
+    pareto_output_path = Path(f"ensemble_results_pareto_{datetime.now().strftime(" % Y % m % d_ % H % M % S")}.csv")
     pareto_points.to_csv(pareto_output_path, index=False)
     logger.info(f"Saved Pareto optimal points to {pareto_output_path}")
 
 if __name__ == "__main__":
-    asyncio.run(main()) 
+    asyncio.run(main())

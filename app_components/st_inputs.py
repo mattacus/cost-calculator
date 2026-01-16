@@ -21,7 +21,7 @@ MAP_INITIAL_LONG = -101.845
 
 def calculate_capex_subtotals(inputs: Dict) -> Dict[str, Dict[str, float]]:
     """Calculate CAPEX subtotals for each system component.
-    
+
     Returns:
         Dict with both unit rates and absolute totals for each component:
         {
@@ -35,39 +35,41 @@ def calculate_capex_subtotals(inputs: Dict) -> Dict[str, Dict[str, float]]:
     solar_capacity_w = inputs['solar_pv_capacity_mw'] * 1_000_000
     # Calculate Solar unit rate and absolute CAPEX
     solar_rate = (
-        inputs['capex_pv_modules'] + 
-        inputs['capex_pv_inverters'] + 
-        inputs['capex_pv_racking'] + 
-        inputs['capex_pv_balance_system'] + 
+        inputs['capex_pv_modules'] +
+        inputs['capex_pv_inverters'] +
+        inputs['capex_pv_racking'] +
+        inputs['capex_pv_balance_system'] +
         inputs['capex_pv_labor']
     )
     solar_absolute = solar_capacity_w * solar_rate
-    
+
     # Calculate BESS unit rate and absolute CAPEX
     bess_rate = (
-        inputs['capex_bess_units'] + 
-        inputs['capex_bess_balance_of_system'] + 
+        inputs['capex_bess_units'] +
+        inputs['capex_bess_balance_of_system'] +
         inputs['capex_bess_labor']
     )
-    bess_system_mwh = inputs['bess_max_power_mw'] * BESS_HRS_STORAGE
+    bess_system_mwh = inputs['bess_capacity_mwh']
     bess_absolute = bess_system_mwh * 1000 * bess_rate
-    
+
     # Calculate Generator unit rate and absolute CAPEX
     generator_rate = (
-        inputs['capex_gensets'] + 
-        inputs['capex_gen_balance_of_system'] + 
+        inputs['capex_gensets'] +
+        inputs['capex_gen_balance_of_system'] +
         inputs['capex_gen_labor']
     )
-    generator_absolute = inputs['generator_capacity_mw'] * 1000 * generator_rate
-    
+    generator_absolute = inputs['generator_capacity_mw'] * \
+        1000 * generator_rate
+
     # Calculate System Integration unit rate and absolute CAPEX
     system_integration_rate = (
-        inputs['capex_si_microgrid'] + 
-        inputs['capex_si_controls'] + 
+        inputs['capex_si_microgrid'] +
+        inputs['capex_si_controls'] +
         inputs['capex_si_labor']
     )
-    system_integration_absolute = inputs['datacenter_load_mw'] * 1000 * system_integration_rate
-    
+    system_integration_absolute = inputs['datacenter_load_mw'] * \
+        1000 * system_integration_rate
+
     # Calculate total hard costs
     total_hard_costs = (
         solar_absolute +
@@ -75,7 +77,7 @@ def calculate_capex_subtotals(inputs: Dict) -> Dict[str, Dict[str, float]]:
         generator_absolute +
         system_integration_absolute
     )
-    
+
     # Calculate soft costs rate and absolute
     soft_costs_rate = (
         inputs['capex_soft_costs_general_conditions'] +
@@ -87,7 +89,7 @@ def calculate_capex_subtotals(inputs: Dict) -> Dict[str, Dict[str, float]]:
         inputs['capex_soft_costs_taxes']
     )
     soft_costs_absolute = total_hard_costs * soft_costs_rate / 100
-    
+
     # Return both rates and absolute values (absolute in millions)
     return {
         'solar': {
@@ -143,17 +145,18 @@ def calculate_capex_subtotals(inputs: Dict) -> Dict[str, Dict[str, float]]:
         }
     }
 
+
 def create_system_inputs() -> Dict:
     """Create all input sections in the Streamlit app."""
     st.subheader("System Configuration")
     col1, col2, col3, col4 = st.columns(4)
-    
+
     # Get query parameters
     query_params = st.query_params
-    
+
     def update_param(key: str):
         st.query_params[key] = st.session_state[key]
-    
+
     with col1:
         datacenter_load = st.number_input(
             "Data Center Demand (MW)",
@@ -165,7 +168,7 @@ def create_system_inputs() -> Dict:
             on_change=update_param,
             args=("dc_load",)
         )
-            
+
     with col2:
         solar_pv_capacity = st.number_input(
             "Solar PV Capacity (MW DC)",
@@ -177,19 +180,39 @@ def create_system_inputs() -> Dict:
             on_change=update_param,
             args=("solar",)
         )
-            
+
     with col3:
+        bess_power_default = int(query_params.get(
+            "bess_power", query_params.get("bess", 150)))
+        bess_energy_default = float(query_params.get(
+            "bess_mwh", bess_power_default * BESS_HRS_STORAGE))
         bess_max_power = st.number_input(
-            "BESS Power (MW), 4hr store",
-            value=int(query_params.get("bess", 150)),
+            "BESS Power (MW)",
+            value=bess_power_default,
             min_value=0,
             max_value=3000,
             step=50,
-            key="bess",
+            key="bess_power",
             on_change=update_param,
-            args=("bess",)
+            args=("bess_power",)
         )
-            
+        bess_capacity_mwh = st.number_input(
+            "BESS Capacity (MWh)",
+            value=float(bess_energy_default),
+            min_value=0.0,
+            max_value=20000.0,
+            step=100.0,
+            format="%.1f",
+            key="bess_mwh",
+            on_change=update_param,
+            args=("bess_mwh",)
+        )
+        if bess_max_power > 0:
+            bess_duration_hours = bess_capacity_mwh / bess_max_power
+        else:
+            bess_duration_hours = 0.0
+        st.caption(f"Calculated duration: {bess_duration_hours:.2f} hours")
+
     with col4:
         generator_capacity = st.number_input(
             "Generator Capacity (MW)",
@@ -201,19 +224,21 @@ def create_system_inputs() -> Dict:
             on_change=update_param,
             args=("gen",)
         )
-            
+
         generator_type = st.selectbox(
             "Generator Type",
             ["Gas Engine", "Gas Turbine"],
-            index=0 if query_params.get("gen_type", "Gas Engine") == "Gas Engine" else 1,
+            index=0 if query_params.get(
+                "gen_type", "Gas Engine") == "Gas Engine" else 1,
             key="gen_type",
             on_change=update_param,
             args=("gen_type",)
         )
-    
+
     # Display capacity chart
     st.plotly_chart(
-        create_capacity_chart(datacenter_load, solar_pv_capacity, bess_max_power, generator_capacity),
+        create_capacity_chart(datacenter_load, solar_pv_capacity,
+                              bess_max_power, generator_capacity),
         use_container_width=True
     )
     st.divider()
@@ -222,20 +247,25 @@ def create_system_inputs() -> Dict:
         'datacenter_load_mw': datacenter_load,
         'solar_pv_capacity_mw': solar_pv_capacity,
         'bess_max_power_mw': bess_max_power,
+        'bess_capacity_mwh': bess_capacity_mwh,
+        'bess_duration_hours': bess_duration_hours,
         'generator_capacity_mw': generator_capacity,
         'generator_type': generator_type,
     }
 
+
 def create_map_input() -> Dict:
     st.subheader("Location")
     st.write("Center the map on your data center location.")
-    
+
     if 'map_initial_load' not in st.session_state:
         st.session_state.map_initial_load = True
         query_params = st.query_params
-        st.session_state.initial_lat = float(query_params.get("lat", MAP_INITIAL_LAT))
-        st.session_state.initial_long = float(query_params.get("long", MAP_INITIAL_LONG))
-    
+        st.session_state.initial_lat = float(
+            query_params.get("lat", MAP_INITIAL_LAT))
+        st.session_state.initial_long = float(
+            query_params.get("long", MAP_INITIAL_LONG))
+
     map = folium.Map(
         [st.session_state.initial_lat, st.session_state.initial_long],
         zoom_start=5,
@@ -247,13 +277,16 @@ def create_map_input() -> Dict:
         # st.query_params["lat"] = st.session_state['folium_map']['center']['lat']
         # st.query_params["long"] = st.session_state['folium_map']['center']['lng']
 
-    st_folium(map, height=370, use_container_width=True, key="folium_map", on_change=update_map_params)
+    st_folium(map, height=370, use_container_width=True,
+              key="folium_map", on_change=update_map_params)
 
     # st.session_state['folium_map'] is only populated after the map has loaded
     try:
-        lat_long_tuple = (st.session_state['folium_map']['center']['lat'], st.session_state['folium_map']['center']['lng'])
+        lat_long_tuple = (st.session_state['folium_map']['center']
+                          ['lat'], st.session_state['folium_map']['center']['lng'])
     except KeyError:
-        lat_long_tuple = (st.session_state.initial_lat, st.session_state.initial_long)
+        lat_long_tuple = (st.session_state.initial_lat,
+                          st.session_state.initial_long)
 
     rg_result = rg.search(lat_long_tuple, mode=1)[0]
     return (*lat_long_tuple, f"{rg_result['name']}, {rg_result['admin1']} ({rg_result['cc']})")
@@ -261,20 +294,21 @@ def create_map_input() -> Dict:
 
 def create_financial_inputs(generator_type: str) -> Dict:
     st.subheader("Financial Inputs")
-    
+
     # Get query parameters
     query_params = st.query_params
-    
+
     def update_param(key: str):
         st.query_params[key] = st.session_state[key]
-    
+
     # Financial Inputs
     with st.expander("Capital Structure"):
         col1, col2 = st.columns(2)
         with col1:
             cost_of_debt = st.number_input(
                 "Cost of Debt (%)",
-                value=float(query_params.get("debt_cost", DEFAULTS_FINANCIAL['cost_of_debt_pct'])),
+                value=float(query_params.get(
+                    "debt_cost", DEFAULTS_FINANCIAL['cost_of_debt_pct'])),
                 min_value=0.0,
                 max_value=100.0,
                 key="debt_cost",
@@ -283,7 +317,8 @@ def create_financial_inputs(generator_type: str) -> Dict:
             )
             leverage = st.number_input(
                 "Leverage (%)",
-                value=float(query_params.get("leverage", DEFAULTS_FINANCIAL['leverage_pct'])),
+                value=float(query_params.get(
+                    "leverage", DEFAULTS_FINANCIAL['leverage_pct'])),
                 min_value=0.0,
                 max_value=100.0,
                 key="leverage",
@@ -292,7 +327,8 @@ def create_financial_inputs(generator_type: str) -> Dict:
             )
             debt_term = st.number_input(
                 "Debt Term (years)",
-                value=int(query_params.get("debt_term", DEFAULTS_FINANCIAL['debt_term_years'])),
+                value=int(query_params.get(
+                    "debt_term", DEFAULTS_FINANCIAL['debt_term_years'])),
                 min_value=1,
                 key="debt_term",
                 on_change=update_param,
@@ -300,7 +336,8 @@ def create_financial_inputs(generator_type: str) -> Dict:
             )
             cost_of_equity = st.number_input(
                 "Cost of Equity (%)",
-                value=float(query_params.get("equity_cost", DEFAULTS_FINANCIAL['cost_of_equity_pct'])),
+                value=float(query_params.get("equity_cost",
+                            DEFAULTS_FINANCIAL['cost_of_equity_pct'])),
                 min_value=0.0,
                 max_value=100.0,
                 key="equity_cost",
@@ -309,7 +346,8 @@ def create_financial_inputs(generator_type: str) -> Dict:
             )
             investment_tax_credit_pct = st.number_input(
                 "Investment Tax Credit (%)",
-                value=float(query_params.get("itc", DEFAULTS_FINANCIAL['investment_tax_credit_pct'])),
+                value=float(query_params.get(
+                    "itc", DEFAULTS_FINANCIAL['investment_tax_credit_pct'])),
                 min_value=0.0,
                 max_value=100.0,
                 key="itc",
@@ -318,14 +356,15 @@ def create_financial_inputs(generator_type: str) -> Dict:
             )
             combined_tax_rate = st.number_input(
                 "Combined Tax Rate (%)",
-                value=float(query_params.get("tax_rate", DEFAULTS_FINANCIAL['combined_tax_rate_pct'])),
+                value=float(query_params.get(
+                    "tax_rate", DEFAULTS_FINANCIAL['combined_tax_rate_pct'])),
                 min_value=0.0,
                 max_value=100.0,
                 key="tax_rate",
                 on_change=update_param,
                 args=("tax_rate",)
             )
-        
+
         with col2:
             # Create default MACRS depreciation schedule (20 years)
             if 'depreciation_schedule' not in st.session_state:
@@ -333,7 +372,7 @@ def create_financial_inputs(generator_type: str) -> Dict:
                     'Year': range(1, 21),
                     'Depreciation (%)': DEFAULTS_DEPRECIATION_SCHEDULE
                 })
-            
+
             # Display editable depreciation schedule
             edited_depreciation = st.data_editor(
                 st.session_state.depreciation_schedule,
@@ -358,10 +397,10 @@ def create_financial_inputs(generator_type: str) -> Dict:
                 hide_index=True,
                 width=400
             )
-            
+
             # Update session state with edited values
             st.session_state.depreciation_schedule = edited_depreciation
-    
+
     # CAPEX Inputs
     with st.expander("CAPEX Costs"):
         # Solar PV
@@ -370,7 +409,8 @@ def create_financial_inputs(generator_type: str) -> Dict:
         with col1:
             pv_modules = st.number_input(
                 "Modules ($/W)",
-                value=float(query_params.get("pv_modules", DEFAULTS_SOLAR_CAPEX['modules'])),
+                value=float(query_params.get(
+                    "pv_modules", DEFAULTS_SOLAR_CAPEX['modules'])),
                 format="%.3f",
                 key="pv_modules",
                 on_change=update_param,
@@ -378,7 +418,8 @@ def create_financial_inputs(generator_type: str) -> Dict:
             )
             pv_inverters = st.number_input(
                 "Inverters ($/W)",
-                value=float(query_params.get("pv_inverters", DEFAULTS_SOLAR_CAPEX['inverters'])),
+                value=float(query_params.get("pv_inverters",
+                            DEFAULTS_SOLAR_CAPEX['inverters'])),
                 format="%.3f",
                 key="pv_inverters",
                 on_change=update_param,
@@ -386,7 +427,8 @@ def create_financial_inputs(generator_type: str) -> Dict:
             )
             pv_racking = st.number_input(
                 "Racking and Foundations ($/W)",
-                value=float(query_params.get("pv_racking", DEFAULTS_SOLAR_CAPEX['racking'])),
+                value=float(query_params.get(
+                    "pv_racking", DEFAULTS_SOLAR_CAPEX['racking'])),
                 format="%.3f",
                 key="pv_racking",
                 on_change=update_param,
@@ -395,7 +437,8 @@ def create_financial_inputs(generator_type: str) -> Dict:
         with col2:
             pv_balance_system = st.number_input(
                 "Balance of System ($/W)",
-                value=float(query_params.get("pv_bos", DEFAULTS_SOLAR_CAPEX['balance_of_system'])),
+                value=float(query_params.get(
+                    "pv_bos", DEFAULTS_SOLAR_CAPEX['balance_of_system'])),
                 format="%.3f",
                 key="pv_bos",
                 on_change=update_param,
@@ -403,20 +446,22 @@ def create_financial_inputs(generator_type: str) -> Dict:
             )
             pv_labor = st.number_input(
                 "Labor ($/W)",
-                value=float(query_params.get("pv_labor", DEFAULTS_SOLAR_CAPEX['labor'])),
+                value=float(query_params.get(
+                    "pv_labor", DEFAULTS_SOLAR_CAPEX['labor'])),
                 format="%.3f",
                 key="pv_labor",
                 on_change=update_param,
                 args=("pv_labor",)
             )
-    
+
         # BESS
         st.subheader("Battery Energy Storage System")
         col1, col2 = st.columns(2)
         with col1:
             bess_units = st.number_input(
                 "BESS Units ($/kWh)",
-                value=int(query_params.get("bess_units", DEFAULTS_BESS_CAPEX['units'])),
+                value=int(query_params.get("bess_units",
+                          DEFAULTS_BESS_CAPEX['units'])),
                 format="%d",
                 key="bess_units",
                 on_change=update_param,
@@ -424,7 +469,8 @@ def create_financial_inputs(generator_type: str) -> Dict:
             )
             bess_balance_of_system = st.number_input(
                 "Balance of System ($/kWh)",
-                value=int(query_params.get("bess_bos", DEFAULTS_BESS_CAPEX['balance_of_system'])),
+                value=int(query_params.get(
+                    "bess_bos", DEFAULTS_BESS_CAPEX['balance_of_system'])),
                 format="%d",
                 key="bess_bos",
                 on_change=update_param,
@@ -433,7 +479,8 @@ def create_financial_inputs(generator_type: str) -> Dict:
         with col2:
             bess_labor = st.number_input(
                 "Labor ($/kWh)",
-                value=int(query_params.get("bess_labor", DEFAULTS_BESS_CAPEX['labor'])),
+                value=int(query_params.get("bess_labor",
+                          DEFAULTS_BESS_CAPEX['labor'])),
                 format="%d",
                 key="bess_labor",
                 on_change=update_param,
@@ -446,16 +493,18 @@ def create_financial_inputs(generator_type: str) -> Dict:
         gen_config = DEFAULTS_GENERATORS[generator_type]
         with col1:
             gensets = st.number_input(
-                "Gensets ($/kW)", 
-                value=int(query_params.get("gensets", gen_config['capex']['gensets'])),
+                "Gensets ($/kW)",
+                value=int(query_params.get(
+                    "gensets", gen_config['capex']['gensets'])),
                 format="%d",
                 key="gensets",
                 on_change=update_param,
                 args=("gensets",)
             )
             gen_balance_of_system = st.number_input(
-                "Balance of System ($/kW)", 
-                value=int(query_params.get("gen_bos", gen_config['capex']['balance_of_system'])),
+                "Balance of System ($/kW)",
+                value=int(query_params.get(
+                    "gen_bos", gen_config['capex']['balance_of_system'])),
                 format="%d",
                 key="gen_bos",
                 on_change=update_param,
@@ -463,8 +512,9 @@ def create_financial_inputs(generator_type: str) -> Dict:
             )
         with col2:
             gen_labor = st.number_input(
-                "Labor ($/kW)", 
-                value=int(query_params.get("gen_labor", gen_config['capex']['labor'])),
+                "Labor ($/kW)",
+                value=int(query_params.get(
+                    "gen_labor", gen_config['capex']['labor'])),
                 format="%d",
                 key="gen_labor",
                 on_change=update_param,
@@ -477,7 +527,8 @@ def create_financial_inputs(generator_type: str) -> Dict:
         with col1:
             si_microgrid = st.number_input(
                 "Microgrid Switchgear, Transformers, etc. ($/kW)",
-                value=int(query_params.get("si_microgrid", DEFAULTS_SYSTEM_INTEGRATION_CAPEX['microgrid'])),
+                value=int(query_params.get("si_microgrid",
+                          DEFAULTS_SYSTEM_INTEGRATION_CAPEX['microgrid'])),
                 format="%d",
                 key="si_microgrid",
                 on_change=update_param,
@@ -485,7 +536,8 @@ def create_financial_inputs(generator_type: str) -> Dict:
             )
             si_controls = st.number_input(
                 "Controls ($/kW)",
-                value=int(query_params.get("si_controls", DEFAULTS_SYSTEM_INTEGRATION_CAPEX['controls'])),
+                value=int(query_params.get("si_controls",
+                          DEFAULTS_SYSTEM_INTEGRATION_CAPEX['controls'])),
                 format="%d",
                 key="si_controls",
                 on_change=update_param,
@@ -494,7 +546,8 @@ def create_financial_inputs(generator_type: str) -> Dict:
         with col2:
             si_labor = st.number_input(
                 "System Integration Labor ($/kW)",
-                value=int(query_params.get("si_labor", DEFAULTS_SYSTEM_INTEGRATION_CAPEX['labor'])),
+                value=int(query_params.get(
+                    "si_labor", DEFAULTS_SYSTEM_INTEGRATION_CAPEX['labor'])),
                 format="%d",
                 key="si_labor",
                 on_change=update_param,
@@ -507,7 +560,8 @@ def create_financial_inputs(generator_type: str) -> Dict:
         with col1:
             soft_costs_general_conditions = st.number_input(
                 "General Conditions (%)",
-                value=float(query_params.get("soft_general", DEFAULTS_SOFT_COSTS_CAPEX['general_conditions'])),
+                value=float(query_params.get("soft_general",
+                            DEFAULTS_SOFT_COSTS_CAPEX['general_conditions'])),
                 format="%.2f",
                 key="soft_general",
                 on_change=update_param,
@@ -515,7 +569,8 @@ def create_financial_inputs(generator_type: str) -> Dict:
             )
             soft_costs_epc_overhead = st.number_input(
                 "EPC Overhead (%)",
-                value=float(query_params.get("soft_epc", DEFAULTS_SOFT_COSTS_CAPEX['epc_overhead'])),
+                value=float(query_params.get(
+                    "soft_epc", DEFAULTS_SOFT_COSTS_CAPEX['epc_overhead'])),
                 format="%.2f",
                 key="soft_epc",
                 on_change=update_param,
@@ -523,7 +578,8 @@ def create_financial_inputs(generator_type: str) -> Dict:
             )
             soft_costs_design_engineering = st.number_input(
                 "Design, Engineering, and Surveys (%)",
-                value=float(query_params.get("soft_design", DEFAULTS_SOFT_COSTS_CAPEX['design_engineering'])),
+                value=float(query_params.get("soft_design",
+                            DEFAULTS_SOFT_COSTS_CAPEX['design_engineering'])),
                 format="%.2f",
                 key="soft_design",
                 on_change=update_param,
@@ -532,7 +588,8 @@ def create_financial_inputs(generator_type: str) -> Dict:
         with col2:
             soft_costs_permitting = st.number_input(
                 "Permitting & Inspection (%)",
-                value=float(query_params.get("soft_permit", DEFAULTS_SOFT_COSTS_CAPEX['permitting'])),
+                value=float(query_params.get("soft_permit",
+                            DEFAULTS_SOFT_COSTS_CAPEX['permitting'])),
                 format="%.2f",
                 key="soft_permit",
                 on_change=update_param,
@@ -540,7 +597,8 @@ def create_financial_inputs(generator_type: str) -> Dict:
             )
             soft_costs_startup = st.number_input(
                 "Startup & Commissioning (%)",
-                value=float(query_params.get("soft_startup", DEFAULTS_SOFT_COSTS_CAPEX['startup'])),
+                value=float(query_params.get("soft_startup",
+                            DEFAULTS_SOFT_COSTS_CAPEX['startup'])),
                 format="%.2f",
                 key="soft_startup",
                 on_change=update_param,
@@ -548,7 +606,8 @@ def create_financial_inputs(generator_type: str) -> Dict:
             )
             soft_costs_insurance = st.number_input(
                 "Insurance (%)",
-                value=float(query_params.get("soft_insurance", DEFAULTS_SOFT_COSTS_CAPEX['insurance'])),
+                value=float(query_params.get("soft_insurance",
+                            DEFAULTS_SOFT_COSTS_CAPEX['insurance'])),
                 format="%.2f",
                 key="soft_insurance",
                 on_change=update_param,
@@ -556,23 +615,25 @@ def create_financial_inputs(generator_type: str) -> Dict:
             )
             soft_costs_taxes = st.number_input(
                 "Taxes (%)",
-                value=float(query_params.get("soft_taxes", DEFAULTS_SOFT_COSTS_CAPEX['taxes'])),
+                value=float(query_params.get(
+                    "soft_taxes", DEFAULTS_SOFT_COSTS_CAPEX['taxes'])),
                 format="%.2f",
                 key="soft_taxes",
                 on_change=update_param,
                 args=("soft_taxes",)
             )
-    
+
     # O&M Inputs
     with st.expander("O&M Rates"):
         col1, col2 = st.columns(2)
-        
+
         # Column 1: Asset-specific O&M
         with col1:
             st.subheader("Operations and Maintenance")
             fuel_price = st.number_input(
                 "Fuel Price ($/MMBtu)",
-                value=float(query_params.get("fuel_price", DEFAULTS_OM['fuel_price_dollar_per_mmbtu'])),
+                value=float(query_params.get(
+                    "fuel_price", DEFAULTS_OM['fuel_price_dollar_per_mmbtu'])),
                 format="%.2f",
                 key="fuel_price",
                 on_change=update_param,
@@ -580,7 +641,8 @@ def create_financial_inputs(generator_type: str) -> Dict:
             )
             solar_om_fixed = st.number_input(
                 "Solar Fixed O&M ($/kW)",
-                value=int(query_params.get("solar_om", DEFAULTS_OM['solar_fixed_dollar_per_kw'])),
+                value=int(query_params.get(
+                    "solar_om", DEFAULTS_OM['solar_fixed_dollar_per_kw'])),
                 format="%d",
                 key="solar_om",
                 on_change=update_param,
@@ -588,23 +650,26 @@ def create_financial_inputs(generator_type: str) -> Dict:
             )
             bess_om_fixed = st.number_input(
                 "BESS Fixed O&M ($/kW)",
-                value=float(query_params.get("bess_om", DEFAULTS_OM['bess_fixed_dollar_per_kw'])),
+                value=float(query_params.get(
+                    "bess_om", DEFAULTS_OM['bess_fixed_dollar_per_kw'])),
                 format="%.1f",
                 key="bess_om",
                 on_change=update_param,
                 args=("bess_om",)
             )
             generator_om_fixed = st.number_input(
-                "Generator Fixed O&M ($/kW)", 
-                value=float(query_params.get("gen_om_fixed", gen_config['opex']['fixed_om'])),
+                "Generator Fixed O&M ($/kW)",
+                value=float(query_params.get("gen_om_fixed",
+                            gen_config['opex']['fixed_om'])),
                 format="%.2f",
                 key="gen_om_fixed",
                 on_change=update_param,
                 args=("gen_om_fixed",)
             )
             generator_om_variable = st.number_input(
-                "Generator Variable O&M ($/kWh)", 
-                value=float(query_params.get("gen_om_var", gen_config['opex']['variable_om'])),
+                "Generator Variable O&M ($/kWh)",
+                value=float(query_params.get(
+                    "gen_om_var", gen_config['opex']['variable_om'])),
                 format="%.3f",
                 key="gen_om_var",
                 on_change=update_param,
@@ -612,7 +677,8 @@ def create_financial_inputs(generator_type: str) -> Dict:
             )
             bos_om_fixed = st.number_input(
                 "Balance of System Fixed O&M ($/kW-load)",
-                value=float(query_params.get("bos_om", DEFAULTS_OM['bos_fixed_dollar_per_kw_load'])),
+                value=float(query_params.get(
+                    "bos_om", DEFAULTS_OM['bos_fixed_dollar_per_kw_load'])),
                 format="%.1f",
                 key="bos_om",
                 on_change=update_param,
@@ -620,19 +686,21 @@ def create_financial_inputs(generator_type: str) -> Dict:
             )
             soft_om_pct = st.number_input(
                 "Soft O&M (% of hard capex)",
-                value=float(query_params.get("soft_om", DEFAULTS_OM['soft_pct'])),
+                value=float(query_params.get(
+                    "soft_om", DEFAULTS_OM['soft_pct'])),
                 format="%.2f",
                 key="soft_om",
                 on_change=update_param,
                 args=("soft_om",)
             )
-            
+
         # Column 2: System-wide O&M and Escalators
         with col2:
             st.subheader("Escalators")
             om_escalator = st.number_input(
                 "O&M Escalator (% p.a.)",
-                value=float(query_params.get("om_escalator", DEFAULTS_OM['escalator_pct'])),
+                value=float(query_params.get("om_escalator",
+                            DEFAULTS_OM['escalator_pct'])),
                 format="%.2f",
                 key="om_escalator",
                 on_change=update_param,
@@ -640,7 +708,8 @@ def create_financial_inputs(generator_type: str) -> Dict:
             )
             fuel_escalator = st.number_input(
                 "Fuel Escalator (% p.a.)",
-                value=float(query_params.get("fuel_escalator", DEFAULTS_OM['fuel_escalator_pct'])),
+                value=float(query_params.get("fuel_escalator",
+                            DEFAULTS_OM['fuel_escalator_pct'])),
                 format="%.2f",
                 key="fuel_escalator",
                 on_change=update_param,
@@ -691,4 +760,4 @@ def create_financial_inputs(generator_type: str) -> Dict:
         'capex_soft_costs_startup': soft_costs_startup,
         'capex_soft_costs_insurance': soft_costs_insurance,
         'capex_soft_costs_taxes': soft_costs_taxes
-    } 
+    }
