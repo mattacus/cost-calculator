@@ -12,9 +12,9 @@ def run_full_year_curtailment_report() -> None:
     lat, lon = 31.5, -104.9
 
     # System configuration
-    solar_capacity_mw = 400
+    solar_capacity_mw = 500
     battery_power_mw = 100
-    battery_capacity_mwh = 1400
+    battery_capacity_mwh = 1600
     generator_capacity_mw = 125
     datacenter_load_mw = 100
 
