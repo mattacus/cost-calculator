@@ -18,6 +18,13 @@ import reverse_geocoder as rg
 MAP_INITIAL_LAT = 35.199
 MAP_INITIAL_LONG = -101.845
 
+SCENARIO_OPTIONS = {
+    "A": "Heavy Training",
+    "B": "Inference-Dominant",
+    "C": "Mixed Workload",
+    "D": "Flat High",
+}
+
 
 def calculate_capex_subtotals(inputs: Dict) -> Dict[str, Dict[str, float]]:
     """Calculate CAPEX subtotals for each system component.
@@ -155,19 +162,58 @@ def create_system_inputs() -> Dict:
     query_params = st.query_params
 
     def update_param(key: str):
+        if key == "load_mode":
+            st.query_params[key] = (
+                "dynamic" if st.session_state[key] == "Dynamic profile" else "static"
+            )
+            return
         st.query_params[key] = st.session_state[key]
 
     with col1:
-        datacenter_load = st.number_input(
-            "Data Center Demand (MW)",
-            value=int(query_params.get("dc_load", 100)),
-            min_value=0,
-            max_value=1002,
-            step=50,
-            key="dc_load",
-            on_change=update_param,
-            args=("dc_load",)
+        load_mode_param = query_params.get("load_mode", "static")
+        load_mode_default = (
+            "Dynamic profile" if load_mode_param in [
+                "dynamic", "Dynamic profile"] else "Static 100 MW"
         )
+        load_mode = st.radio(
+            "Datacenter Load Mode",
+            options=["Static 100 MW", "Dynamic profile"],
+            index=0 if load_mode_default == "Static 100 MW" else 1,
+            key="load_mode",
+            on_change=update_param,
+            args=("load_mode",)
+        )
+
+        if load_mode == "Static 100 MW":
+            datacenter_load = 100
+            st.caption("Using fixed 100 MW load")
+            load_profile_scenario = "B"
+        else:
+            datacenter_load = st.number_input(
+                "Datacenter Load (MW)",
+                value=float(query_params.get("dc_load", 100)),
+                min_value=0.0,
+                max_value=5000.0,
+                step=10.0,
+                key="dc_load",
+                on_change=update_param,
+                args=("dc_load",)
+            )
+
+            scenario_default = query_params.get("load_scenario", "B").upper()
+            scenario_index = list(SCENARIO_OPTIONS.keys()).index(
+                scenario_default if scenario_default in SCENARIO_OPTIONS else "B"
+            )
+            scenario_key = st.selectbox(
+                "Load Profile Scenario",
+                options=list(SCENARIO_OPTIONS.keys()),
+                index=scenario_index,
+                key="load_scenario",
+                on_change=update_param,
+                args=("load_scenario",),
+                format_func=lambda key: f"{key} - {SCENARIO_OPTIONS[key]}"
+            )
+            load_profile_scenario = scenario_key
 
     with col2:
         solar_pv_capacity = st.number_input(
@@ -245,6 +291,8 @@ def create_system_inputs() -> Dict:
 
     return {
         'datacenter_load_mw': datacenter_load,
+        'load_mode': load_mode,
+        'load_profile_scenario': load_profile_scenario,
         'solar_pv_capacity_mw': solar_pv_capacity,
         'bess_max_power_mw': bess_max_power,
         'bess_capacity_mwh': bess_capacity_mwh,

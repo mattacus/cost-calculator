@@ -6,6 +6,7 @@ import time
 
 from core.datacenter import DataCenter
 from core.powerflow_model import simulate_system, get_solar_ac_dataframe, calculate_energy_mix
+from core.load_profiles import LoadProfileConfig, build_synthetic_load_profile
 from app_components.st_outputs import (
     format_proforma, display_proforma, create_capex_chart, display_intro_section,
     create_energy_mix_chart, display_daily_sample_chart, create_subcategory_capex_charts
@@ -63,6 +64,16 @@ def main():
         calc_status_display.code(st.session_state.calculation_status)
 
         t1 = time.time()
+        load_profile = None
+        if inputs.get('load_mode') == "Dynamic profile":
+            load_profile_df = build_synthetic_load_profile(
+                LoadProfileConfig(
+                    nameplate_mw=inputs['datacenter_load_mw'],
+                    scenario=inputs['load_profile_scenario'],
+                )
+            )
+            load_profile = load_profile_df['load_mw'].to_numpy()
+
         powerflow_results = simulate_system(
             inputs['lat'],
             inputs['long'],
@@ -72,6 +83,7 @@ def main():
             inputs['generator_capacity_mw'],
             inputs['datacenter_load_mw'],
             inputs['bess_capacity_mwh'],
+            load_profile_mw=load_profile,
         )
         st.session_state.calculation_status += f"\nPowerflow simulation ran in {time.time()-t1:.2f} seconds"
         calc_status_display.code(st.session_state.calculation_status)

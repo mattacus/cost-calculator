@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from datetime import datetime, timedelta
+from pathlib import Path
 
 
 class SyntheticAILoadGenerator:
@@ -20,8 +21,10 @@ class SyntheticAILoadGenerator:
         'D': 1.00   # Flat high load: no reduction
     }
 
-    def __init__(self, nameplate_mw=100):
+    def __init__(self, nameplate_mw=100, base_dir: str | Path | None = None):
         self.nameplate = nameplate_mw
+        self.base_dir = Path(base_dir) if base_dir is not None else Path(
+            __file__).resolve().parent
         self.scenarios = {
             'A': self._define_scenario_a(),
             'B': self._define_scenario_b(),
@@ -31,7 +34,8 @@ class SyntheticAILoadGenerator:
 
     def _define_scenario_a(self):
         """Heavy Training scenario definition"""
-        df = pd.read_csv('ScenarioA_HeavyTraining-Hour-LoadMW-Description.csv')
+        df = pd.read_csv(
+            self.base_dir / 'ScenarioA_HeavyTraining-Hour-LoadMW-Description.csv')
         return {
             'name': 'Heavy Training',
             'profile': df['Load (%)'].values * self.nameplate / 100.0,
@@ -42,7 +46,7 @@ class SyntheticAILoadGenerator:
     def _define_scenario_b(self):
         """Inference-Dominant scenario definition"""
         df = pd.read_csv(
-            'ScenarioB_InferenceDominant-Hour-LoadMW-Description.csv')
+            self.base_dir / 'ScenarioB_InferenceDominant-Hour-LoadMW-Description.csv')
         return {
             'name': 'Inference-Dominant',
             'profile': df['Load (%)'].values * self.nameplate / 100.0,
@@ -52,7 +56,8 @@ class SyntheticAILoadGenerator:
 
     def _define_scenario_c(self):
         """Mixed Workload scenario definition"""
-        df = pd.read_csv('ScenarioC_MixedWorkload-Hour-LoadMW-Description.csv')
+        df = pd.read_csv(
+            self.base_dir / 'ScenarioC_MixedWorkload-Hour-LoadMW-Description.csv')
         return {
             'name': 'Mixed Workload',
             'profile': df['Load (%)'].values * self.nameplate / 100.0,
@@ -63,7 +68,7 @@ class SyntheticAILoadGenerator:
     def _define_scenario_d(self):
         """Flat/Constant High Load scenario definition"""
         df = pd.read_csv(
-            'ScenarioD_HighLoadFlat-Activity-Hour-LoadMW-Description.csv')
+            self.base_dir / 'ScenarioD_HighLoadFlat-Activity-Hour-LoadMW-Description.csv')
         return {
             'name': 'Flat High',
             'profile': df['Load (%)'].values * self.nameplate / 100.0,

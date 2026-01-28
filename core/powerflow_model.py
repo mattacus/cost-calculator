@@ -11,7 +11,7 @@ from pvlib import pvsystem, modelchain, location, iotools
 import logging
 import time
 import streamlit as st
-from typing import Dict
+from typing import Dict, Iterable
 import numpy as np
 import tzfpy
 import requests
@@ -150,13 +150,31 @@ def get_solar_ac_dataframe(
     return solar_generation_df
 
 
+def _coerce_load_profile(load_profile: Iterable[float] | float, n_steps: int) -> np.ndarray:
+    """Ensure load profile is a numpy array of length n_steps."""
+    if np.isscalar(load_profile):
+        return np.full(n_steps, float(load_profile))
+
+    load_array = np.asarray(load_profile, dtype=float)
+    if load_array.ndim != 1:
+        load_array = load_array.flatten()
+
+    if len(load_array) == n_steps:
+        return load_array
+    if len(load_array) > n_steps:
+        return load_array[:n_steps]
+
+    repeats = int(np.ceil(n_steps / len(load_array)))
+    return np.tile(load_array, repeats)[:n_steps]
+
+
 def simulate_battery_operation(
     df: pd.DataFrame,
     battery_capacity_mwh: float,
     battery_power_mw: float,
     initial_battery_charge: float,
     generator_capacity: float,
-    load_mw: float,
+    load_mw: float | Iterable[float],
     operating_year: int,
 ) -> pd.DataFrame:
     """
@@ -169,9 +187,10 @@ def simulate_battery_operation(
         1 - BATTERY_DEGRADATION_PCT_PER_YEAR * (operating_year - 1)
     )
 
-    # Convert solar generation to numpy array for faster computation
+    # Convert solar generation and load to numpy arrays for faster computation
     solar_generation = df["scaled_solar_generation_mw"].to_numpy()
     n_steps = len(solar_generation)
+    load_profile = _coerce_load_profile(load_mw, n_steps)
 
     # Initialize arrays
     battery_state = np.zeros(n_steps + 1)  # +1 for initial state
@@ -183,7 +202,7 @@ def simulate_battery_operation(
     unmet_load = np.zeros(n_steps)
 
     # Calculate power balance
-    power_balance = solar_generation - load_mw
+    power_balance = solar_generation - load_profile
     excess_power = np.maximum(power_balance, 0)
     deficit_power = np.maximum(-power_balance, 0)
 
@@ -226,7 +245,8 @@ def simulate_battery_operation(
         'curtailed_solar_mwh': curtailed_solar,
         'generator_output_mwh': generator_output,
         'unmet_load_mwh': unmet_load,
-        'load_served_mwh': load_mw - unmet_load
+        'load_mw': load_profile,
+        'load_served_mwh': load_profile - unmet_load
     })
 
     return pd.concat([df, results], axis=1)
@@ -264,6 +284,7 @@ def simulate_system(
     generator_capacity_mw: float,
     data_center_demand_mw: float = 100,
     battery_capacity_mwh: float | None = None,
+    load_profile_mw: Iterable[float] | pd.DataFrame | pd.Series | None = None,
 ) -> pl.DataFrame:
     """
     Simulate complete system performance over its lifetime.
@@ -298,6 +319,17 @@ def simulate_system(
 
     # Get normalized solar generation profile
     solar_generation_df = _solar_ac_dataframe
+    base_load_profile = None
+    if load_profile_mw is not None:
+        if isinstance(load_profile_mw, pd.DataFrame):
+            if "load_mw" not in load_profile_mw.columns:
+                raise ValueError(
+                    "load_profile_mw DataFrame must include a 'load_mw' column")
+            base_load_profile = load_profile_mw["load_mw"].to_numpy()
+        elif isinstance(load_profile_mw, pd.Series):
+            base_load_profile = load_profile_mw.to_numpy()
+        else:
+            base_load_profile = np.asarray(load_profile_mw, dtype=float)
 
     annual_results = []
     for operating_year in range(1, SYSTEM_LIFETIME_YEARS + 1):
@@ -313,13 +345,18 @@ def simulate_system(
         initial_charge = 0 if operating_year == 0 else battery_capacity_mwh
 
         # Simulate battery and generator operation
+        load_profile = data_center_demand_mw
+        if base_load_profile is not None:
+            load_profile = _coerce_load_profile(
+                base_load_profile, len(scaled_df))
+
         result_df = simulate_battery_operation(
             scaled_df,
             battery_capacity_mwh,
             battery_power_mw,
             initial_charge,
             generator_capacity_mw,
-            data_center_demand_mw,
+            load_profile,
             operating_year,
         )
         # Get sample week of data for dashboard
@@ -341,6 +378,12 @@ def simulate_system(
         solar_mwh_raw_tot = result_df["scaled_solar_generation_mw"].sum()
         solar_mwh_curtailed_tot = result_df["curtailed_solar_mwh"].sum()
         # Append results for the current year
+        load_energy_mwh = (
+            load_profile.sum()
+            if isinstance(load_profile, np.ndarray)
+            else data_center_demand_mw * len(result_df)
+        )
+
         annual_results.append(
             {
                 "system_spec": f"{int(solar_capacity_mw)}MW | {int(battery_power_mw)}MW | {int(generator_capacity_mw)}MW",
@@ -365,8 +408,7 @@ def simulate_system(
                 # This method of calculating load served produces sliiightly different results to the original,
                 # but I think this may be more correct.
                 "Load Served (MWh)": round(
-                    data_center_demand_mw * 8760 -
-                    result_df["unmet_load_mwh"].sum()
+                    load_energy_mwh - result_df["unmet_load_mwh"].sum()
                 ),
             }
         )

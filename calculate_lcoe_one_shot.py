@@ -5,7 +5,8 @@ import argparse
 import logging
 from core.datacenter import DataCenter
 from core.powerflow_model import get_solar_ac_dataframe, simulate_system
-from core.defaults import BESS_HRS_STORAGE
+from core.defaults import BESS_HRS_STORAGE, DATACENTER_DEMAND_MW
+from core.load_profiles import LoadProfileConfig, build_synthetic_load_profile
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -29,8 +30,12 @@ def parse_args():
                         help='BESS energy capacity in MWh')
     parser.add_argument('--generator-mw', type=int, required=True, dest='generator_capacity_mw',
                         help='Generator capacity in MW')
-    parser.add_argument('--datacenter-load-mw', type=int,
-                        help='Datacenter load in MW')
+    parser.add_argument('--datacenter-load-mw', type=float,
+                        help='Datacenter load in MW (nameplate for dynamic mode)')
+    parser.add_argument('--load-mode', choices=['static', 'dynamic'], default='static',
+                        help='Static 100 MW or dynamic synthetic profile')
+    parser.add_argument('--load-scenario', choices=['A', 'B', 'C', 'D'], default='B',
+                        help='Synthetic load scenario (dynamic mode only)')
 
     # Optional arguments (all parameter names match DataCenter class)
     parser.add_argument('--generator-type', choices=['Gas Engine', 'Gas Turbine'],
@@ -94,7 +99,10 @@ if __name__ == '__main__':
 
     # Remove None values from args
     inputs = {k: v for k, v in args.items() if v is not None and k not in [
-        'lat', 'long']}
+        'lat', 'long', 'load_mode', 'load_scenario']}
+
+    if inputs.get('datacenter_load_mw') is None:
+        inputs['datacenter_load_mw'] = DATACENTER_DEMAND_MW
 
     logger.info(
         f"Getting solar generation data for ({args['lat']}, {args['long']})")
@@ -102,6 +110,16 @@ if __name__ == '__main__':
 
     logger.info(
         f"Simulating battery and solar powerflow for ({args['lat']}, {args['long']})")
+    load_profile = None
+    if args.get('load_mode') == 'dynamic':
+        load_profile_df = build_synthetic_load_profile(
+            LoadProfileConfig(
+                nameplate_mw=inputs['datacenter_load_mw'],
+                scenario=args.get('load_scenario', 'B'),
+            )
+        )
+        load_profile = load_profile_df['load_mw'].to_numpy()
+
     powerflow_results = simulate_system(
         args['lat'],
         args['long'],
@@ -111,6 +129,7 @@ if __name__ == '__main__':
         inputs['generator_capacity_mw'],
         inputs['datacenter_load_mw'],
         inputs['bess_capacity_mwh'],
+        load_profile_mw=load_profile,
     )
 
     logger.info("Creating DataCenter instance and calculating LCOE...")

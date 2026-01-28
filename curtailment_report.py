@@ -5,6 +5,8 @@ from core.powerflow_model import (
     scale_solar_generation,
     simulate_battery_operation,
 )
+from core.defaults import DATACENTER_DEMAND_MW
+from core.load_profiles import LoadProfileConfig, build_synthetic_load_profile
 
 
 def run_full_year_curtailment_report() -> None:
@@ -16,7 +18,8 @@ def run_full_year_curtailment_report() -> None:
     battery_power_mw = 100
     battery_capacity_mwh = 1600
     generator_capacity_mw = 125
-    datacenter_load_mw = 100
+    datacenter_load_mw = DATACENTER_DEMAND_MW
+    load_profile_scenario = "C"
 
     # Initial battery state of charge (MWh). Using 0 avoids immediate curtailment
     # from starting the year with a full battery.
@@ -29,13 +32,21 @@ def run_full_year_curtailment_report() -> None:
     scaled_df = scale_solar_generation(
         solar_df.copy(), solar_capacity_mw, operating_year)
 
+    load_profile_df = build_synthetic_load_profile(
+        LoadProfileConfig(
+            nameplate_mw=datacenter_load_mw,
+            scenario=load_profile_scenario,
+        )
+    )
+
     hourly = simulate_battery_operation(
         scaled_df,
         battery_capacity_mwh,
         battery_power_mw,
         initial_battery_charge=initial_battery_charge_mwh,
         generator_capacity=generator_capacity_mw,
-        load_mw=datacenter_load_mw,
+        # load_mw=datacenter_load_mw,  # static load profile
+        load_mw=load_profile_df["load_mw"].to_numpy(),  # dynamic load profile
         operating_year=operating_year,
     )
 
@@ -55,7 +66,7 @@ def run_full_year_curtailment_report() -> None:
     power_limited_hours = curtailed_hours - battery_full_hours
 
     excess_solar_hours = int(
-        (hourly["scaled_solar_generation_mw"] > datacenter_load_mw).sum()
+        (hourly["scaled_solar_generation_mw"] > hourly["load_mw"]).sum()
     )
 
     print("Curtailment report (full year TMY)")
