@@ -14,9 +14,9 @@ from core.defaults import (
 )
 import reverse_geocoder as rg
 
-# Amarillo, TX
-MAP_INITIAL_LAT = 35.199
-MAP_INITIAL_LONG = -101.845
+# Monahans, TX
+MAP_INITIAL_LAT = 31.59
+MAP_INITIAL_LONG = -102.89
 
 SCENARIO_OPTIONS = {
     "A": "Heavy Training",
@@ -316,7 +316,7 @@ def create_map_input() -> Dict:
 
     map = folium.Map(
         [st.session_state.initial_lat, st.session_state.initial_long],
-        zoom_start=5,
+        zoom_start=10,
         tiles="CartoDB Positron"
     )
 

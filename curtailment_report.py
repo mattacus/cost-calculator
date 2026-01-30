@@ -10,13 +10,13 @@ from core.load_profiles import LoadProfileConfig, build_synthetic_load_profile
 
 
 def run_full_year_curtailment_report() -> None:
-    # Location: Van Horn, Texas (US)
-    lat, lon = 31.5, -104.9
+    # Location: Monahans, Texas (US)
+    lat, lon = 31.59, -102.89
 
     # System configuration
-    solar_capacity_mw = 500
+    solar_capacity_mw = 200
     battery_power_mw = 100
-    battery_capacity_mwh = 1600
+    battery_capacity_mwh = 200
     generator_capacity_mw = 125
     datacenter_load_mw = DATACENTER_DEMAND_MW
     load_profile_scenario = "C"
